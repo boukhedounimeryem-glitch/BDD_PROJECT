@@ -1,14 +1,10 @@
-import streamlit.web.bootstrap as bootstrap
-import os
+import subprocess
 import sys
-
-# Ensure project root is visible
-sys.path.insert(0, os.path.dirname(__file__))
+import os
 
 if __name__ == "__main__":
-    bootstrap.run(
-        "frontend/app.py",
-        "",
-        [],
-        {}
-    )
+    # Get the absolute path to the app file
+    app_path = os.path.join(os.path.dirname(__file__), "frontend", "app.py")
+    
+    # Run streamlit using subprocess
+    subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])

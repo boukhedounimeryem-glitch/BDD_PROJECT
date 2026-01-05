@@ -8,6 +8,9 @@ def get_all_examens():
     cur.execute("""
         SELECT
             e.id,
+            d.nom AS departement,
+            f.niveau,
+            f.nom AS formation,
             m.nom AS module,
             e.date,
             e.heure_debut,
@@ -16,9 +19,11 @@ def get_all_examens():
             s.nom AS salle
         FROM examen e
         JOIN module m ON m.id = e.module_id
+        JOIN formation f ON f.id = m.formation_id
+        JOIN departement d ON d.id = f.departement_id
         JOIN professeur p ON p.id = e.professeur_id
         JOIN salle s ON s.id = e.salle_id
-        ORDER BY e.date, e.heure_debut;
+        ORDER BY e.date, e.heure_debut, f.niveau, f.nom;
     """)
 
     data = cur.fetchall()

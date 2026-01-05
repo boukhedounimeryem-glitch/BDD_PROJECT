@@ -1,0 +1,10 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Optional system files
+.DS_Store
+git rm -r --cached backend/__pycache__/
+git rm -r --cached backend/database/__pycache__/
+git rm -r --cached backend/optimization/__pycache__/
+git rm -r --cached backend/services/__pycache__/
