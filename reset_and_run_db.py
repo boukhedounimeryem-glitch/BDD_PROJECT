@@ -5,6 +5,9 @@ import psycopg2
 import sys
 import io
 import os
+import base64
+import hashlib
+import hmac
 
 # Fix encoding
 if sys.platform == 'win32':
@@ -36,6 +39,7 @@ try:
         "DROP FUNCTION IF EXISTS public.check_student_one_exam_per_day();",
         "DROP FUNCTION IF EXISTS public.check_professor_max_3_exams();",
         "DROP FUNCTION IF EXISTS public.check_exam_overlap();",
+        "DROP TABLE IF EXISTS public.utilisateur CASCADE;",
         "DROP TABLE IF EXISTS public.inscription CASCADE;",
         "DROP TABLE IF EXISTS public.examen CASCADE;",
         "DROP TABLE IF EXISTS public.etudiant CASCADE;",
@@ -69,6 +73,46 @@ try:
     cur.execute(sql_content)
     conn.commit()
     print("✅ Script SQL exécuté avec succès!")
+
+    def _hash_password(password: str, *, iterations: int = 210_000) -> str:
+        salt = os.urandom(16)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return "pbkdf2_sha256$%d$%s$%s" % (
+            iterations,
+            base64.b64encode(salt).decode("ascii"),
+            base64.b64encode(dk).decode("ascii"),
+        )
+
+    def _ensure_user(login: str, password: str, role: str, professeur_id=None, etudiant_id=None) -> None:
+        cur.execute(
+            """
+            INSERT INTO public.utilisateur (login, password_hash, role, professeur_id, etudiant_id)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (login) DO UPDATE
+            SET password_hash = EXCLUDED.password_hash,
+                role = EXCLUDED.role,
+                professeur_id = EXCLUDED.professeur_id,
+                etudiant_id = EXCLUDED.etudiant_id;
+            """,
+            (login, _hash_password(password), role, professeur_id, etudiant_id),
+        )
+
+    print("\n👤 Création des comptes (admin/prof/étudiant)...")
+    _ensure_user("admin", "admin123", "admin")
+
+    cur.execute("SELECT id FROM public.professeur ORDER BY id;")
+    prof_ids = [r['id'] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
+    for pid in prof_ids:
+        _ensure_user(f"prof{pid}", "prof123", "prof", professeur_id=pid)
+
+    cur.execute("SELECT id FROM public.etudiant ORDER BY id;")
+    etu_ids = [r['id'] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
+    for eid in etu_ids:
+        _ensure_user(f"etu{eid}", "etud123", "etudiant", etudiant_id=eid)
+        _ensure_user(f"etud{eid}", "etud123", "etudiant", etudiant_id=eid)
+
+    conn.commit()
+    print("✅ Comptes créés.")
     
     # Vérifier les tables créées
     print("\n📊 Vérification des tables créées...")
@@ -99,6 +143,11 @@ try:
     print("="*60)
     print("\n🚀 Vous pouvez maintenant utiliser l'application!")
     print("   python main.py")
+    print("\n🔐 Logins par défaut:")
+    print("   - admin / admin123")
+    print("   - prof<ID> / prof123    (ex: prof1 / prof123)")
+    print("   - etu<ID> / etud123     (ex: etu1 / etud123)")
+    print("   - etud<ID> / etud123    (ex: etud1 / etud123)")
     
 except Exception as e:
     print(f"\n❌ Erreur: {str(e)}")

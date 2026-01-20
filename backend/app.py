@@ -3,13 +3,16 @@ import sys
 import os
 
 # Add project root to Python path so that backend imports work
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+base_path = getattr(sys, "_MEIPASS", None)
+project_root = base_path or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # ======================
 # IMPORTS BACKEND
 # ======================
+from backend.database import queries as db_queries
+
 from backend.database.queries import (
     get_all_examens,
     get_examens_simple,
@@ -20,7 +23,10 @@ from backend.database.queries import (
     get_formations_by_departement,
     get_examens_filtered,
     kpi_occupation_salles,
-    kpi_examens_par_prof
+    kpi_examens_par_prof,
+    authenticate_user,
+    get_examens_for_professeur,
+    get_examens_for_etudiant
 )
 
 from backend.services.examen_service import (
@@ -53,34 +59,112 @@ st.title("📅 Exam Scheduler")
 st.caption("Interface de gestion et d’optimisation des examens")
 st.divider()
 
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+if st.session_state.user is None:
+    try:
+        user_count = db_queries.get_user_count()
+    except Exception as e:
+        st.error(f"❌ Erreur DB: {e}")
+        st.info("💡 Vérifiez que PostgreSQL est démarré.")
+        st.stop()
+
+    if user_count == 0:
+        st.error("Aucun compte n'existe dans la table utilisateur.")
+        st.info("💡 Exécutez d'abord: python reset_and_run_db.py (ça crée admin/prof/étudiant)")
+        st.stop()
+
+    with st.container(border=True):
+        st.subheader("🔐 Connexion")
+        login = st.text_input("Login")
+        password = st.text_input("Mot de passe", type="password")
+        if st.button("Se connecter"):
+            user = authenticate_user(login, password)
+            if user is None:
+                st.error("Login ou mot de passe incorrect")
+            else:
+                st.session_state.user = user
+                _safe_rerun()
+    st.stop()
+
+user = st.session_state.user
+
+with st.sidebar:
+    st.write(f"Connecté: {user['login']}")
+    st.write(f"Rôle: {user['role']}")
+    if st.button("Se déconnecter"):
+        st.session_state.user = None
+        _safe_rerun()
+
 # ======================
 # CHARGEMENT GLOBAL DES DONNÉES
 # ======================
-with st.spinner("Chargement des données..."):
-    try:
-        modules = get_modules()
-        professeurs = get_professeurs()
-        salles = get_salles()
-        departements = get_departements()
-        examens_simple = get_examens_simple()
-    except Exception as e:
-        st.error(f"❌ Erreur de connexion à la base de données: {str(e)}")
-        st.info(
-            "💡 Vérifiez que PostgreSQL est démarré et que la base "
-            "de données 'exam_scheduler' existe."
-        )
+if user["role"] == "admin":
+    with st.spinner("Chargement des données..."):
+        try:
+            modules = get_modules()
+            professeurs = get_professeurs()
+            salles = get_salles()
+            departements = get_departements()
+            examens_simple = get_examens_simple()
+        except Exception as e:
+            st.error(f"❌ Erreur de connexion à la base de données: {str(e)}")
+            st.info(
+                "💡 Vérifiez que PostgreSQL est démarré et que la base "
+                "de données 'exam_scheduler' existe."
+            )
+            st.stop()
+else:
+    modules = []
+    professeurs = []
+    salles = []
+    departements = []
+    examens_simple = []
+
+if user["role"] == "admin":
+    # Gardes simples pour éviter les crashes en cas de données manquantes
+    if not departements:
+        st.warning("Aucun département trouvé. Ajoutez des données dans la base.")
         st.stop()
 
-# Gardes simples pour éviter les crashes en cas de données manquantes
-if not departements:
-    st.warning("Aucun département trouvé. Ajoutez des données dans la base.")
+    if not professeurs or not modules or not salles:
+        st.warning(
+            "Certaines données de référence sont manquantes "
+            "(modules, professeurs ou salles). Complétez la base avant de continuer."
+        )
+
+if user["role"] == "prof":
+    st.subheader("📋 Mes examens (Professeur)")
+    if not user.get("professeur_id"):
+        st.error("Compte professeur invalide (professeur_id manquant)")
+        st.stop()
+    examens_prof = get_examens_for_professeur(int(user["professeur_id"]))
+    st.dataframe(examens_prof, use_container_width=True)
+
+    st.subheader("📊 KPIs")
+    col1, col2 = st.columns(2)
+    with col1:
+        occ = kpi_occupation_salles()
+        st.write("📌 Occupation des salles")
+        st.dataframe(occ, use_container_width=True)
+    with col2:
+        kpi_prof = kpi_examens_par_prof()
+        st.write("👨‍🏫 Examens par professeur")
+        st.dataframe(kpi_prof, use_container_width=True)
     st.stop()
 
-if not professeurs or not modules or not salles:
-    st.warning(
-        "Certaines données de référence sont manquantes "
-        "(modules, professeurs ou salles). Complétez la base avant de continuer."
-    )
+if user["role"] == "etudiant":
+    st.subheader("📋 Mes examens (Étudiant)")
+    if not user.get("etudiant_id"):
+        st.error("Compte étudiant invalide (etudiant_id manquant)")
+        st.stop()
+    examens_etu = get_examens_for_etudiant(int(user["etudiant_id"]))
+    if examens_etu:
+        st.dataframe(examens_etu, use_container_width=True)
+    else:
+        st.info("Aucun examen trouvé pour le moment.")
+    st.stop()
 
 # ======================
 # 🔍 FILTRES ANALYTIQUES
@@ -136,17 +220,72 @@ st.dataframe(filtered_examens, use_container_width=True)
 # ======================
 st.subheader("📊 Dashboard KPI")
 
+col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+
+try:
+    all_examens = get_all_examens()
+except Exception:
+    all_examens = []
+
+with col_kpi1:
+    st.metric("Examens", len(all_examens) if all_examens else 0)
+
+with col_kpi2:
+    st.metric("Modules", len(modules) if modules else 0)
+
+with col_kpi3:
+    st.metric("Professeurs", len(professeurs) if professeurs else 0)
+
+with col_kpi4:
+    st.metric("Salles", len(salles) if salles else 0)
+
 col1, col2 = st.columns(2)
 
 with col1:
     st.write("📌 Occupation des salles")
     occ = kpi_occupation_salles()
     st.dataframe(occ, use_container_width=True)
+    if occ:
+        df_occ = pd.DataFrame(occ)
+        if not df_occ.empty:
+            y_col = None
+            for cand in ["occupation", "taux", "pourcentage", "nb_examens", "count"]:
+                if cand in df_occ.columns:
+                    y_col = cand
+                    break
+            if y_col is not None:
+                df_occ_chart = df_occ.copy()
+                x_col = None
+                for cand in ["salle", "nom", "id", "salle_id"]:
+                    if cand in df_occ_chart.columns:
+                        x_col = cand
+                        break
+                if x_col is not None:
+                    df_occ_chart = df_occ_chart.set_index(x_col)
+                st.bar_chart(df_occ_chart[[y_col]].head(20), use_container_width=True)
 
 with col2:
     st.write("👨‍🏫 Examens par professeur")
     kpi_prof = kpi_examens_par_prof()
     st.dataframe(kpi_prof, use_container_width=True)
+    if kpi_prof:
+        df_prof = pd.DataFrame(kpi_prof)
+        if not df_prof.empty:
+            y_col = None
+            for cand in ["nb_examens", "count", "total"]:
+                if cand in df_prof.columns:
+                    y_col = cand
+                    break
+            if y_col is not None:
+                df_prof_chart = df_prof.copy()
+                x_col = None
+                for cand in ["professeur", "nom", "id", "professeur_id"]:
+                    if cand in df_prof_chart.columns:
+                        x_col = cand
+                        break
+                if x_col is not None:
+                    df_prof_chart = df_prof_chart.set_index(x_col)
+                st.bar_chart(df_prof_chart[[y_col]].head(20), use_container_width=True)
 
 st.divider()
 

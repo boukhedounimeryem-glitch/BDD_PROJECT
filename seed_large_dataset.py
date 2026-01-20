@@ -34,8 +34,8 @@ LEVELS = ["L1", "L2", "L3", "M1", "M2"]
 MIN_MODULES_PER_FORMATION = 6
 MAX_MODULES_PER_FORMATION = 9
 
-STUDENTS_COUNT = 8000  # plusieurs milliers d'étudiants
-PROFS_PER_DEPT = 20  # ~140 professeurs
+STUDENTS_COUNT = 100  # 100 étudiants
+PROFS_PER_DEPT = 7  # 7 * 7 = 49 professeurs + 1 supplémentaire = 50
 
 
 DEPT_NAMES = [
@@ -189,6 +189,13 @@ def main() -> None:
                 specialite = f"Spécialité {dept_name}"
                 profs.append((prof_id, name, specialite, dept_id))
                 prof_id += 1
+        
+        # Ajouter un professeur supplémentaire pour atteindre 50
+        first = random.choice(FIRST_NAMES)
+        last = random.choice(LAST_NAMES)
+        name = f"Dr {last} {first}"
+        specialite = "Spécialité Interdépartementaire"
+        profs.append((prof_id, name, specialite, 1))  # Assigné au premier département
 
         cur.executemany(
             """
